@@ -1,5 +1,6 @@
 """分析実行モジュール - NBAAnalyzerを呼び出して結果を返す"""
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,28 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.data_loader import NBADataLoader
 from src.analysis import NBAAnalyzer
 from src.utils import merge_player_image
+
+
+def get_data_dir() -> str:
+    """
+    データディレクトリを環境に応じて自動選択
+
+    優先順位:
+    1. 環境変数 DATA_DIR
+    2. Databricks Volume パス（存在する場合）
+    3. ローカルの data ディレクトリ
+    """
+    # 環境変数で明示的に指定されている場合
+    if os.environ.get("DATA_DIR"):
+        return os.environ["DATA_DIR"]
+
+    # Databricks環境の場合（Volumeパスが存在するか）
+    databricks_path = "/Volumes/workspace/nba_analysis/data"
+    if os.path.exists(databricks_path):
+        return databricks_path
+
+    # ローカル環境
+    return "data"
 
 
 # 利用可能な関数のマッピング
@@ -35,7 +58,8 @@ def load_data():
     Returns:
         tuple: (df, analyzer, games_df) - 分析用データフレーム、NBAAnalyzerインスタンス、試合情報
     """
-    loader = NBADataLoader(data_dir="data")
+    data_dir = get_data_dir()
+    loader = NBADataLoader(data_dir=data_dir)
     loader.load_boxscore("boxscore1946-2025.csv")
     loader.load_games("games1946-2025.csv")
     loader.load_player_info("Players_data_Latest.csv")
@@ -97,7 +121,8 @@ def execute_analysis(parsed: dict) -> tuple[Optional[pd.DataFrame], str]:
 
         # 選手画像をマージ
         if "playerName" in result.columns:
-            result = merge_player_image(result)
+            image_csv = f"{get_data_dir()}/player_imageURL.csv"
+            result = merge_player_image(result, image_csv=image_csv)
 
         return result, description
 
