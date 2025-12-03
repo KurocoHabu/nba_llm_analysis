@@ -45,6 +45,11 @@ AVAILABLE_FUNCTIONS = {
 }
 
 
+def _is_databricks_apps() -> bool:
+    """Databricks Apps環境かどうかを判定"""
+    return os.environ.get("DATABRICKS_APPS") == "true"
+
+
 @st.cache_resource(show_spinner=False)
 def load_data():
     """
@@ -55,8 +60,15 @@ def load_data():
     """
     data_dir = get_data_dir()
     loader = NBADataLoader(data_dir=data_dir)
-    loader.load_boxscore("boxscore1946-2025.csv.gz")
-    loader.load_games("games1946-2025.csv.gz")
+
+    # Databricks Appsでは非圧縮ファイル、それ以外では圧縮ファイルを使用
+    if _is_databricks_apps():
+        loader.load_boxscore("boxscore1946-2025.csv")
+        loader.load_games("games1946-2025.csv")
+    else:
+        loader.load_boxscore("boxscore1946-2025.csv.gz")
+        loader.load_games("games1946-2025.csv.gz")
+
     loader.load_player_info("Players_data_Latest.csv")
 
     df = loader.create_analysis_df()

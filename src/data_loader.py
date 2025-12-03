@@ -31,7 +31,9 @@ STAT_START_SEASONS = {
 
 def is_databricks_apps() -> bool:
     """Databricks Apps環境かどうかを判定"""
-    return os.environ.get("DATABRICKS_APPS") == "true"
+    result = os.environ.get("DATABRICKS_APPS") == "true"
+    print(f"[DEBUG] DATABRICKS_APPS={os.environ.get('DATABRICKS_APPS')}, is_databricks={result}")
+    return result
 
 
 def download_from_volume(volume_path: str) -> bytes:
