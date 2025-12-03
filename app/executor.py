@@ -1,10 +1,11 @@
-"""分析実行モジュール - NBAAnalyzerを呼び出して結果を返す"""
+"""分析実行モジュール - NBAAnalyzerを呼び出して結果を返す（Polars版）"""
 
 import os
 import sys
 from pathlib import Path
 from typing import Optional
 
+import polars as pl
 import pandas as pd
 import streamlit as st
 
@@ -47,7 +48,7 @@ AVAILABLE_FUNCTIONS = {
 @st.cache_resource(show_spinner=False)
 def load_data():
     """
-    データを読み込んでキャッシュ
+    データを読み込んでキャッシュ（Polars版）
 
     Returns:
         tuple: (df, analyzer, games_df) - 分析用データフレーム、NBAAnalyzerインスタンス、試合情報
@@ -81,6 +82,7 @@ def execute_analysis(parsed: dict) -> tuple[Optional[pd.DataFrame], str]:
 
     Returns:
         tuple: (結果DataFrame, メッセージ)
+        ※結果はpandas DataFrameとして返す（Streamlit/Plotly互換性のため）
     """
     func_name = parsed.get("function")
     params = parsed.get("params", {})
@@ -112,6 +114,10 @@ def execute_analysis(parsed: dict) -> tuple[Optional[pd.DataFrame], str]:
         # 結果が空の場合
         if result is None or len(result) == 0:
             return None, "条件に一致するデータが見つかりませんでした"
+
+        # Polars DataFrameの場合はpandasに変換
+        if isinstance(result, pl.DataFrame):
+            result = result.to_pandas()
 
         # 選手画像をマージ
         if "playerName" in result.columns:
@@ -209,7 +215,7 @@ def get_value_column(result: pd.DataFrame, parsed: dict) -> Optional[str]:
         return label
 
     # 一般的な値列名を探す
-    for col in ["TotalPTS", "PTS", "TRB", "AST", "STL", "BLK", "3P", "Win", "DD", "TD", "Games"]:
+    for col in ["TotalPTS", "PTS", "TRB", "AST", "STL", "BLK", "3P", "Win", "DD", "TD", "Games", "Count"]:
         if col in result.columns:
             return col
 

@@ -1,6 +1,7 @@
 # NBA Stats Chat App dependencies
 
 # Data processing
+polars>=0.20.0
 pandas>=2.0.0
 numpy>=1.24.0
 

@@ -1,14 +1,15 @@
 """
-ユーティリティ関数モジュール
+ユーティリティ関数モジュール（Polars版）
 
 - 画像URLのマージ
 - ランキングデータの整形
 - CSV出力
 """
 
+import polars as pl
 import pandas as pd
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Union
 
 
 # =============================================================================
@@ -16,7 +17,7 @@ from typing import Optional, List
 # =============================================================================
 
 def merge_player_image(
-    df: pd.DataFrame,
+    df: Union[pl.DataFrame, pd.DataFrame],
     player_col: str = "playerName",
     image_csv: str = "data/player_imageURL.csv",
 ) -> pd.DataFrame:
@@ -25,7 +26,7 @@ def merge_player_image(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pl.DataFrame or pd.DataFrame
         対象のデータフレーム
     player_col : str
         選手名の列名
@@ -35,8 +36,12 @@ def merge_player_image(
     Returns
     -------
     pd.DataFrame
-        画像URL列を追加したデータフレーム
+        画像URL列を追加したデータフレーム（pandas）
     """
+    # pandasに変換
+    if isinstance(df, pl.DataFrame):
+        df = df.to_pandas()
+
     player_im = pd.read_csv(image_csv)
 
     # player_colが"playerName"でない場合はリネーム
@@ -57,7 +62,7 @@ def merge_player_image(
 
 
 def merge_team_image(
-    df: pd.DataFrame,
+    df: Union[pl.DataFrame, pd.DataFrame],
     team_col: str = "teamName",
     image_csv: str = "data/team_images.csv",
 ) -> pd.DataFrame:
@@ -66,7 +71,7 @@ def merge_team_image(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pl.DataFrame or pd.DataFrame
         対象のデータフレーム
     team_col : str
         チーム名の列名
@@ -76,8 +81,12 @@ def merge_team_image(
     Returns
     -------
     pd.DataFrame
-        画像URL・略称列を追加したデータフレーム
+        画像URL・略称列を追加したデータフレーム（pandas）
     """
+    # pandasに変換
+    if isinstance(df, pl.DataFrame):
+        df = df.to_pandas()
+
     team_im = pd.read_csv(image_csv)
 
     # カラム名を合わせる
@@ -100,7 +109,7 @@ def merge_team_image(
 # =============================================================================
 
 def format_ranking(
-    df: pd.DataFrame,
+    df: Union[pl.DataFrame, pd.DataFrame],
     value_col: str,
     ascending: bool = False,
     add_rank: bool = True,
@@ -111,7 +120,7 @@ def format_ranking(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pl.DataFrame or pd.DataFrame
         ランキングデータ
     value_col : str
         ランキングの基準となる列
@@ -125,8 +134,12 @@ def format_ranking(
     Returns
     -------
     pd.DataFrame
-        整形後のデータフレーム
+        整形後のデータフレーム（pandas）
     """
+    # pandasに変換
+    if isinstance(df, pl.DataFrame):
+        df = df.to_pandas()
+
     result = df.sort_values(value_col, ascending=ascending).reset_index(drop=True)
 
     if add_rank:
@@ -167,7 +180,7 @@ def shorten_player_name(name: str, max_length: int = 15) -> str:
 
 
 def add_short_name_column(
-    df: pd.DataFrame,
+    df: Union[pl.DataFrame, pd.DataFrame],
     name_col: str = "playerName",
     new_col: str = "shortName",
     max_length: int = 15,
@@ -177,7 +190,7 @@ def add_short_name_column(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pl.DataFrame or pd.DataFrame
         対象のデータフレーム
     name_col : str
         選手名の列
@@ -189,8 +202,12 @@ def add_short_name_column(
     Returns
     -------
     pd.DataFrame
-        短縮名列を追加したデータフレーム
+        短縮名列を追加したデータフレーム（pandas）
     """
+    # pandasに変換
+    if isinstance(df, pl.DataFrame):
+        df = df.to_pandas()
+
     result = df.copy()
     result[new_col] = result[name_col].apply(
         lambda x: shorten_player_name(x, max_length)
@@ -215,7 +232,7 @@ EXCLUDE_PLAYERS = [
 
 
 def filter_duplicate_names(
-    df: pd.DataFrame,
+    df: Union[pl.DataFrame, pd.DataFrame],
     player_col: str = "playerName",
     exclude_list: Optional[List[str]] = None,
 ) -> pd.DataFrame:
@@ -224,7 +241,7 @@ def filter_duplicate_names(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pl.DataFrame or pd.DataFrame
         対象のデータフレーム
     player_col : str
         選手名の列
@@ -234,8 +251,12 @@ def filter_duplicate_names(
     Returns
     -------
     pd.DataFrame
-        除外後のデータフレーム
+        除外後のデータフレーム（pandas）
     """
+    # pandasに変換
+    if isinstance(df, pl.DataFrame):
+        df = df.to_pandas()
+
     exclude = exclude_list or EXCLUDE_PLAYERS
     return df[~df[player_col].isin(exclude)]
 
@@ -250,7 +271,7 @@ PLAYER_NAME_MAPPING = {
 
 
 def standardize_player_names(
-    df: pd.DataFrame,
+    df: Union[pl.DataFrame, pd.DataFrame],
     player_col: str = "playerName",
     mapping: Optional[dict] = None,
 ) -> pd.DataFrame:
@@ -259,7 +280,7 @@ def standardize_player_names(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pl.DataFrame or pd.DataFrame
         対象のデータフレーム
     player_col : str
         選手名の列
@@ -269,8 +290,12 @@ def standardize_player_names(
     Returns
     -------
     pd.DataFrame
-        標準化後のデータフレーム
+        標準化後のデータフレーム（pandas）
     """
+    # pandasに変換
+    if isinstance(df, pl.DataFrame):
+        df = df.to_pandas()
+
     result = df.copy()
     name_map = mapping or PLAYER_NAME_MAPPING
     result[player_col] = result[player_col].replace(name_map)
@@ -282,7 +307,7 @@ def standardize_player_names(
 # =============================================================================
 
 def save_ranking_to_csv(
-    df: pd.DataFrame,
+    df: Union[pl.DataFrame, pd.DataFrame],
     filename: str,
     output_dir: str = "output",
     add_images: bool = True,
@@ -293,7 +318,7 @@ def save_ranking_to_csv(
 
     Parameters
     ----------
-    df : pd.DataFrame
+    df : pl.DataFrame or pd.DataFrame
         保存するデータフレーム
     filename : str
         ファイル名
@@ -312,7 +337,11 @@ def save_ranking_to_csv(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    result = df.copy()
+    # pandasに変換
+    if isinstance(df, pl.DataFrame):
+        result = df.to_pandas()
+    else:
+        result = df.copy()
 
     if add_images and "playerName" in result.columns:
         result = merge_player_image(result, image_csv=image_csv)

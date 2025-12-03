@@ -1,17 +1,16 @@
 """
-データ読み込み・前処理モジュール
+データ読み込み・前処理モジュール（Polars版）
 
 boxscoreとgamesデータを結合し、分析用のデータフレームを作成する
 """
 
-import numpy as np
-import pandas as pd
+import polars as pl
 from pathlib import Path
 from typing import Optional
 
 
 # 各スタッツの計測開始シーズン（seasonStartYear）
-# このシーズンより前のデータはNaNに変換される
+# このシーズンより前のデータはNullに変換される
 STAT_START_SEASONS = {
     "TRB": 1950,   # 1950-51シーズンから
     "STL": 1973,   # 1973-74シーズンから
@@ -26,7 +25,7 @@ STAT_START_SEASONS = {
 
 
 class NBADataLoader:
-    """NBAデータの読み込みと前処理を行うクラス"""
+    """NBAデータの読み込みと前処理を行うクラス（Polars版）"""
 
     def __init__(self, data_dir: str = "data"):
         """
@@ -36,40 +35,54 @@ class NBADataLoader:
             データディレクトリのパス
         """
         self.data_dir = Path(data_dir)
-        self._boxscore: Optional[pd.DataFrame] = None
-        self._games: Optional[pd.DataFrame] = None
-        self._player_info: Optional[pd.DataFrame] = None
-        self._merged_df: Optional[pd.DataFrame] = None
+        self._boxscore: Optional[pl.DataFrame] = None
+        self._games: Optional[pl.DataFrame] = None
+        self._player_info: Optional[pl.DataFrame] = None
+        self._merged_df: Optional[pl.DataFrame] = None
 
     # =========================================================================
     # データ読み込み
     # =========================================================================
 
-    def load_boxscore(self, filename: str = "boxscore1946-2025.csv.gz") -> pd.DataFrame:
+    def load_boxscore(self, filename: str = "boxscore1946-2025.csv.gz") -> pl.DataFrame:
         """boxscoreデータを読み込む（gzip圧縮対応）
 
-        pandasは.gzファイルを自動的に認識して解凍します。
+        Polarsは.gzファイルを自動的に認識して解凍します。
         """
         filepath = self.data_dir / filename
-        self._boxscore = pd.read_csv(filepath)
+        # MP列は時間形式（"48:00"など）なので文字列として読み込む
+        try:
+            # Polars >= 0.19
+            self._boxscore = pl.read_csv(
+                filepath,
+                schema_overrides={"MP": pl.Utf8},
+                infer_schema_length=10000,
+            )
+        except TypeError:
+            # Polars < 0.19
+            self._boxscore = pl.read_csv(
+                filepath,
+                dtypes={"MP": pl.Utf8},
+                infer_schema_length=10000,
+            )
         return self._boxscore
 
-    def load_games(self, filename: str = "games1946-2025.csv.gz") -> pd.DataFrame:
+    def load_games(self, filename: str = "games1946-2025.csv.gz") -> pl.DataFrame:
         """gamesデータを読み込む（gzip圧縮対応）
 
-        pandasは.gzファイルを自動的に認識して解凍します。
+        Polarsは.gzファイルを自動的に認識して解凍します。
         """
         filepath = self.data_dir / filename
-        self._games = pd.read_csv(filepath)
+        self._games = pl.read_csv(filepath)
         return self._games
 
-    def load_player_info(self, filename: str = "Players_data_Latest.csv") -> pd.DataFrame:
+    def load_player_info(self, filename: str = "Players_data_Latest.csv") -> pl.DataFrame:
         """選手情報データを読み込む"""
         filepath = self.data_dir / filename
-        self._player_info = pd.read_csv(filepath)
+        self._player_info = pl.read_csv(filepath)
         if "birth_date" in self._player_info.columns:
-            self._player_info["birth_date"] = pd.to_datetime(
-                self._player_info["birth_date"], errors="coerce"
+            self._player_info = self._player_info.with_columns(
+                pl.col("birth_date").str.to_datetime(format="%Y-%m-%d", strict=False)
             )
         return self._player_info
 
@@ -79,22 +92,22 @@ class NBADataLoader:
 
     def create_analysis_df(
         self,
-        boxscore: Optional[pd.DataFrame] = None,
-        games: Optional[pd.DataFrame] = None,
-    ) -> pd.DataFrame:
+        boxscore: Optional[pl.DataFrame] = None,
+        games: Optional[pl.DataFrame] = None,
+    ) -> pl.DataFrame:
         """
         boxscoreとgamesを結合し、分析用の派生列を追加したデータフレームを作成
 
         Parameters
         ----------
-        boxscore : pd.DataFrame, optional
+        boxscore : pl.DataFrame, optional
             boxscoreデータ（指定しない場合は事前に読み込んだデータを使用）
-        games : pd.DataFrame, optional
+        games : pl.DataFrame, optional
             gamesデータ（指定しない場合は事前に読み込んだデータを使用）
 
         Returns
         -------
-        pd.DataFrame
+        pl.DataFrame
             分析用データフレーム
         """
         bs = boxscore if boxscore is not None else self._boxscore
@@ -109,120 +122,165 @@ class NBADataLoader:
             "Winner", "game_id", "Arena", "datetime"
         ]
         available_cols = [c for c in merge_cols if c in gm.columns]
-        df = bs.merge(gm[available_cols], on="game_id")
+        df = bs.join(gm.select(available_cols), on="game_id")
 
-        # 計測開始前のスタッツをNaNに変換
+        # 計測開始前のスタッツをNullに変換
         df = self._nullify_pre_tracking_stats(df)
 
         # 派生列を追加
         df = self._add_derived_columns(df)
 
-        # 日時でソートしてリセット
-        df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-        df = df.sort_values("datetime").reset_index(drop=True)
+        # 日時でソート
+        df = df.with_columns(
+            pl.col("datetime").str.to_datetime(strict=False)
+        ).sort("datetime")
 
         # シーズン列を追加
-        df["season"] = df["seasonStartYear"].apply(
-            lambda x: f"{int(x)}-{int(x)+1}" if pd.notna(x) else None
+        df = df.with_columns(
+            pl.when(pl.col("seasonStartYear").is_not_null())
+            .then(
+                pl.col("seasonStartYear").cast(pl.Int64).cast(pl.Utf8) + "-" +
+                (pl.col("seasonStartYear").cast(pl.Int64) + 1).cast(pl.Utf8)
+            )
+            .otherwise(None)
+            .alias("season")
         )
 
         self._merged_df = df
         return df
 
-    def _add_derived_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _add_derived_columns(self, df: pl.DataFrame) -> pl.DataFrame:
         """派生列（統計フラグなど）を追加"""
         # 勝敗フラグ
-        df["Win"] = np.where(df["teamName"] == df["Winner"], 1, 0)
-        df["Lose"] = np.where(df["Win"] == 1, 0, 1)
+        df = df.with_columns([
+            pl.when(pl.col("teamName") == pl.col("Winner"))
+            .then(1).otherwise(0).alias("Win"),
+            pl.when(pl.col("teamName") == pl.col("Winner"))
+            .then(0).otherwise(1).alias("Lose"),
+        ])
 
         # 出場フラグ（スタッツが1つでもあるか）
         stat_cols = ["FG", "FGA", "3P", "3PA", "FT", "FTA", "ORB", "DRB",
                      "TRB", "AST", "STL", "BLK", "TOV", "PF", "PTS", "+/-"]
-        df["Played"] = np.where(
-            (df[stat_cols] != 0).any(axis=1) | (df["MP"] != "0"), 1, 0
+        available_stat_cols = [c for c in stat_cols if c in df.columns]
+
+        # 各スタッツが0でないかチェック
+        stat_check = pl.lit(False)
+        for col in available_stat_cols:
+            stat_check = stat_check | (pl.col(col) != 0)
+
+        df = df.with_columns(
+            pl.when(stat_check | (pl.col("MP") != "0"))
+            .then(1).otherwise(0).alias("Played")
         )
 
         # ダブルダブル・トリプルダブル判定
         df = self._add_double_flags(df)
 
         # 2Pシュート
-        df["2P"] = df["FG"] - df["3P"]
-        df["2PA"] = df["FGA"] - df["3PA"]
-        df["Stocks"] = df["STL"] + df["BLK"]
+        df = df.with_columns([
+            (pl.col("FG") - pl.col("3P")).alias("2P"),
+            (pl.col("FGA") - pl.col("3PA")).alias("2PA"),
+            (pl.col("STL") + pl.col("BLK")).alias("Stocks"),
+        ])
 
         # 各種スタッツ閾値フラグ
         df = self._add_stat_threshold_flags(df)
 
         # TOV関連
-        df["TOV_0"] = np.where(df["TOV"] == 0, 1, 0)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ast_tov_ratio = df["AST"] / df["TOV"]
-            df["ASTTOV>=3"] = np.where(ast_tov_ratio >= 3, 1, 0)
+        df = df.with_columns([
+            pl.when(pl.col("TOV") == 0).then(1).otherwise(0).alias("TOV_0"),
+            pl.when((pl.col("TOV") != 0) & (pl.col("AST") / pl.col("TOV") >= 3))
+            .then(1).otherwise(0).alias("ASTTOV>=3"),
+        ])
 
         return df
 
-    def _add_double_flags(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _add_double_flags(self, df: pl.DataFrame) -> pl.DataFrame:
         """ダブルダブル・トリプルダブルなどのフラグを追加"""
-        pts10 = (df["PTS"] >= 10).astype(int)
-        ast10 = (df["AST"] >= 10).astype(int)
-        trb10 = (df["TRB"] >= 10).astype(int)
-        stl10 = (df["STL"] >= 10).astype(int)
-        blk10 = (df["BLK"] >= 10).astype(int)
+        df = df.with_columns([
+            (pl.col("PTS") >= 10).cast(pl.Int64).alias("_pts10"),
+            (pl.col("AST") >= 10).cast(pl.Int64).alias("_ast10"),
+            (pl.col("TRB") >= 10).cast(pl.Int64).alias("_trb10"),
+            (pl.col("STL") >= 10).cast(pl.Int64).alias("_stl10"),
+            (pl.col("BLK") >= 10).cast(pl.Int64).alias("_blk10"),
+        ])
 
-        doubles_count = pts10 + ast10 + trb10 + stl10 + blk10
+        df = df.with_columns(
+            (pl.col("_pts10") + pl.col("_ast10") + pl.col("_trb10") +
+             pl.col("_stl10") + pl.col("_blk10")).alias("_doubles_count")
+        )
 
-        df["DD"] = np.where(doubles_count == 2, 1, 0)  # ダブルダブル
-        df["TD"] = np.where(doubles_count == 3, 1, 0)  # トリプルダブル
-        df["QD"] = np.where(doubles_count == 4, 1, 0)  # クアドラプルダブル
+        df = df.with_columns([
+            pl.when(pl.col("_doubles_count") == 2).then(1).otherwise(0).alias("DD"),
+            pl.when(pl.col("_doubles_count") == 3).then(1).otherwise(0).alias("TD"),
+            pl.when(pl.col("_doubles_count") == 4).then(1).otherwise(0).alias("QD"),
+        ])
+
+        # 一時列を削除
+        df = df.drop(["_pts10", "_ast10", "_trb10", "_stl10", "_blk10", "_doubles_count"])
 
         return df
 
-    def _add_stat_threshold_flags(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _add_stat_threshold_flags(self, df: pl.DataFrame) -> pl.DataFrame:
         """各種スタッツの閾値フラグを追加"""
         # 得点
         for pts in [10, 20, 25, 30, 40, 50]:
-            df[f"{pts}PTS+"] = np.where(df["PTS"] >= pts, 1, 0)
+            df = df.with_columns(
+                pl.when(pl.col("PTS") >= pts).then(1).otherwise(0).alias(f"{pts}PTS+")
+            )
 
         # オフェンスリバウンド
         for orb in [5, 10]:
-            df[f"{orb}ORB+"] = np.where(df["ORB"] >= orb, 1, 0)
+            df = df.with_columns(
+                pl.when(pl.col("ORB") >= orb).then(1).otherwise(0).alias(f"{orb}ORB+")
+            )
 
         # トータルリバウンド
         for trb in [10, 15, 20, 25, 30]:
-            df[f"{trb}TRB+"] = np.where(df["TRB"] >= trb, 1, 0)
+            df = df.with_columns(
+                pl.when(pl.col("TRB") >= trb).then(1).otherwise(0).alias(f"{trb}TRB+")
+            )
 
         # アシスト
         for ast in [10, 15, 20, 25]:
-            df[f"{ast}AST+"] = np.where(df["AST"] >= ast, 1, 0)
+            df = df.with_columns(
+                pl.when(pl.col("AST") >= ast).then(1).otherwise(0).alias(f"{ast}AST+")
+            )
 
         # 3ポイント
-        df["5_3P+"] = np.where(df["3P"] >= 5, 1, 0)
-        df["3P_1+"] = np.where(df["3P"] >= 1, 1, 0)
+        df = df.with_columns([
+            pl.when(pl.col("3P") >= 5).then(1).otherwise(0).alias("5_3P+"),
+            pl.when(pl.col("3P") >= 1).then(1).otherwise(0).alias("3P_1+"),
+        ])
 
         # 複合ダブルダブル
-        df["AST&PTS_DD"] = np.where(
-            (df["AST"] >= 10) & (df["PTS"] >= 10), 1, 0
-        )
-        df["TRB&PTS_DD"] = np.where(
-            (df["TRB"] >= 10) & (df["PTS"] >= 10), 1, 0
-        )
-        df["20PTS_20TRB"] = np.where(
-            (df["PTS"] >= 20) & (df["TRB"] >= 20), 1, 0
-        )
+        df = df.with_columns([
+            pl.when((pl.col("AST") >= 10) & (pl.col("PTS") >= 10))
+            .then(1).otherwise(0).alias("AST&PTS_DD"),
+            pl.when((pl.col("TRB") >= 10) & (pl.col("PTS") >= 10))
+            .then(1).otherwise(0).alias("TRB&PTS_DD"),
+            pl.when((pl.col("PTS") >= 20) & (pl.col("TRB") >= 20))
+            .then(1).otherwise(0).alias("20PTS_20TRB"),
+        ])
 
         return df
 
-    def _nullify_pre_tracking_stats(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _nullify_pre_tracking_stats(self, df: pl.DataFrame) -> pl.DataFrame:
         """
-        計測開始前のスタッツをNaNに変換
+        計測開始前のスタッツをNullに変換
 
         各スタッツは計測開始時期が異なるため、計測開始前のデータを
-        NaNに変換して誤った分析を防ぐ
+        Nullに変換して誤った分析を防ぐ
         """
         for stat, start_year in STAT_START_SEASONS.items():
             if stat in df.columns:
-                mask = df["seasonStartYear"] < start_year
-                df.loc[mask, stat] = np.nan
+                df = df.with_columns(
+                    pl.when(pl.col("seasonStartYear") < start_year)
+                    .then(None)
+                    .otherwise(pl.col(stat))
+                    .alias(stat)
+                )
         return df
 
     # =========================================================================
@@ -231,22 +289,22 @@ class NBADataLoader:
 
     def add_age_columns(
         self,
-        df: pd.DataFrame,
-        player_info: Optional[pd.DataFrame] = None,
-    ) -> pd.DataFrame:
+        df: pl.DataFrame,
+        player_info: Optional[pl.DataFrame] = None,
+    ) -> pl.DataFrame:
         """
         選手の年齢関連列を追加
 
         Parameters
         ----------
-        df : pd.DataFrame
+        df : pl.DataFrame
             分析用データフレーム
-        player_info : pd.DataFrame, optional
+        player_info : pl.DataFrame, optional
             選手情報データ
 
         Returns
         -------
-        pd.DataFrame
+        pl.DataFrame
             年齢列を追加したデータフレーム
         """
         pi = player_info if player_info is not None else self._player_info
@@ -255,47 +313,54 @@ class NBADataLoader:
             raise ValueError("player_infoデータを先に読み込んでください")
 
         # 選手情報をマージ
-        df = df.merge(pi, left_on="playerName", right_on="name", how="left")
+        df = df.join(pi, left_on="playerName", right_on="name", how="left")
 
         # シーズン終了年
-        df["season_end"] = df["season"].str.split("-").str[1].astype(float)
+        df = df.with_columns(
+            pl.col("season").str.split("-").list.get(1).cast(pl.Float64).alias("season_end")
+        )
 
         # 生年月日から年齢計算
-        df["birth_year"] = df["birth_date"].dt.year
-        df["birth_month"] = df["birth_date"].dt.month
-        df["birth_day"] = df["birth_date"].dt.day
+        df = df.with_columns([
+            pl.col("birth_date").dt.year().alias("birth_year"),
+            pl.col("birth_date").dt.month().alias("birth_month"),
+            pl.col("birth_date").dt.day().alias("birth_day"),
+        ])
 
         # 30歳到達日
-        df["birth_date_30years"] = df["birth_date"] + pd.DateOffset(years=30)
-        df["is_30years_old"] = np.where(
-            df["datetime"] >= df["birth_date_30years"], 1, 0
+        df = df.with_columns(
+            (pl.col("birth_date") + pl.duration(days=365 * 30)).alias("birth_date_30years")
+        )
+        df = df.with_columns(
+            pl.when(pl.col("datetime") >= pl.col("birth_date_30years"))
+            .then(1).otherwise(0).alias("is_30years_old")
         )
 
         # 単純年齢
-        df["age"] = df["season_end"] - df["birth_year"]
+        df = df.with_columns(
+            (pl.col("season_end") - pl.col("birth_year")).alias("age")
+        )
 
-        # シーズン終了時の年齢（月日を考慮）
-        regular_season = df[df["isRegular"] == 1]
-        season_end_day = regular_season.groupby("season")["datetime"].transform("max")
-        df["season_end_day"] = season_end_day
-
-        df["age_at_season_end"] = np.where(
-            df["birth_month"] > df["season_end_day"].dt.month,
-            df["season_end"] - df["birth_year"] - 1,
-            df["season_end"] - df["birth_year"]
+        # シーズン終了時の年齢（月日を考慮）- 簡易版
+        df = df.with_columns(
+            pl.when(pl.col("birth_month") > 6)
+            .then(pl.col("season_end") - pl.col("birth_year") - 1)
+            .otherwise(pl.col("season_end") - pl.col("birth_year"))
+            .alias("age_at_season_end")
         )
 
         # 試合日時点での正確な年齢（誕生日を考慮）
-        # 年の差を計算し、まだ誕生日を迎えていない場合は1を引く
-        df["age_at_game"] = (
-            df["datetime"].dt.year - df["birth_date"].dt.year -
+        df = df.with_columns(
             (
-                (df["datetime"].dt.month < df["birth_date"].dt.month) |
+                pl.col("datetime").dt.year() - pl.col("birth_date").dt.year() -
                 (
-                    (df["datetime"].dt.month == df["birth_date"].dt.month) &
-                    (df["datetime"].dt.day < df["birth_date"].dt.day)
-                )
-            ).astype(int)
+                    (pl.col("datetime").dt.month() < pl.col("birth_date").dt.month()) |
+                    (
+                        (pl.col("datetime").dt.month() == pl.col("birth_date").dt.month()) &
+                        (pl.col("datetime").dt.day() < pl.col("birth_date").dt.day())
+                    )
+                ).cast(pl.Int64)
+            ).alias("age_at_game")
         )
 
         return df
@@ -305,17 +370,17 @@ class NBADataLoader:
     # =========================================================================
 
     @property
-    def boxscore(self) -> Optional[pd.DataFrame]:
+    def boxscore(self) -> Optional[pl.DataFrame]:
         return self._boxscore
 
     @property
-    def games(self) -> Optional[pd.DataFrame]:
+    def games(self) -> Optional[pl.DataFrame]:
         return self._games
 
     @property
-    def player_info(self) -> Optional[pd.DataFrame]:
+    def player_info(self) -> Optional[pl.DataFrame]:
         return self._player_info
 
     @property
-    def merged_df(self) -> Optional[pd.DataFrame]:
+    def merged_df(self) -> Optional[pl.DataFrame]:
         return self._merged_df
