@@ -15,11 +15,17 @@ MODEL = "claude-haiku-4-5-20251001"
 def _get_api_key_from_databricks() -> str:
     """Databricks SecretsからAPIキーを取得"""
     try:
+        import base64
         from databricks.sdk import WorkspaceClient
+        print("[DEBUG] Attempting to get API key from Databricks Secrets...")
         w = WorkspaceClient()
         response = w.secrets.get_secret(scope="nba-app", key="ANTHROPIC_API_KEY")
-        return response.value
-    except Exception:
+        # シークレット値はbase64エンコードされている
+        api_key = base64.b64decode(response.value).decode('utf-8')
+        print("[DEBUG] Successfully retrieved API key from Databricks Secrets")
+        return api_key
+    except Exception as e:
+        print(f"[DEBUG] Failed to get API key from Databricks Secrets: {type(e).__name__}: {e}")
         return None
 
 
