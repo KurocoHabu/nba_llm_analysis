@@ -327,7 +327,8 @@ def main():
         st.rerun()
 
     # チャット入力（Enterで送信）
-    if prompt := st.chat_input("分析したいことを入力（例: コービー対レブロンのデュエル）"):
+    prompt = st.chat_input("分析したいことを入力（例: コービー対レブロンのデュエル）")
+    if prompt:
         process_query(prompt.strip())
         st.rerun()
 
