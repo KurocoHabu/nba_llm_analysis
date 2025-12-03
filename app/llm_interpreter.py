@@ -12,12 +12,27 @@ from .prompts import SYSTEM_PROMPT, build_messages
 MODEL = "claude-haiku-4-5-20251001"
 
 
+def _get_api_key_from_databricks() -> str:
+    """Databricks SecretsからAPIキーを取得"""
+    try:
+        from databricks.sdk import WorkspaceClient
+        w = WorkspaceClient()
+        response = w.secrets.get_secret(scope="nba-app", key="ANTHROPIC_API_KEY")
+        return response.value
+    except Exception:
+        return None
+
+
 def get_client() -> Anthropic:
     """Anthropicクライアントを取得"""
     # 環境変数を優先
     api_key = os.environ.get("ANTHROPIC_API_KEY")
 
-    # 環境変数になければst.secretsから取得（Streamlit Cloud用）
+    # 環境変数になければDatabricks Secretsから取得
+    if not api_key:
+        api_key = _get_api_key_from_databricks()
+
+    # それでもなければst.secretsから取得（Streamlit Cloud用）
     if not api_key:
         try:
             api_key = st.secrets.get("ANTHROPIC_API_KEY")
