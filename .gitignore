@@ -22,11 +22,8 @@ Thumbs.db
 # Streamlit
 .streamlit/secrets.toml
 
-# Data (large uncompressed files - use .gz versions instead)
-data/boxscore1946-2025.csv
-data/games1946-2025.csv
-data/play_data_*.csv
-data/query_history.json
+# Data (stored in Databricks Volume for production)
+data/
 
 # Logs
 *.log
