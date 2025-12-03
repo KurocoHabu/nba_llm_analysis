@@ -2,3 +2,7 @@ command: ['streamlit', 'run', 'app/main.py']
 env:
   - name: 'ANTHROPIC_API_KEY'
     valueFrom: 'ANTHROPIC_API_KEY'
+  - name: 'DATABRICKS_APPS'
+    value: 'true'
+  - name: 'DATA_DIR'
+    value: '/Volumes/workspace/nba_analysis/data'

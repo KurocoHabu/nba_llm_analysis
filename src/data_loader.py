@@ -2,8 +2,13 @@
 データ読み込み・前処理モジュール（Polars版）
 
 boxscoreとgamesデータを結合し、分析用のデータフレームを作成する
+
+Databricks Apps環境では、Databricks SDKを経由してVolumeにアクセスする
 """
 
+import os
+import io
+import gzip
 import polars as pl
 from pathlib import Path
 from typing import Optional
@@ -24,6 +29,32 @@ STAT_START_SEASONS = {
 }
 
 
+def is_databricks_apps() -> bool:
+    """Databricks Apps環境かどうかを判定"""
+    return os.environ.get("DATABRICKS_APPS") == "true"
+
+
+def download_from_volume(volume_path: str) -> bytes:
+    """
+    Databricks SDKを使ってVolumeからファイルをダウンロード
+
+    Parameters
+    ----------
+    volume_path : str
+        Volumeのパス（例: /Volumes/workspace/nba_analysis/data/file.csv）
+
+    Returns
+    -------
+    bytes
+        ファイルの内容
+    """
+    from databricks.sdk import WorkspaceClient
+
+    w = WorkspaceClient()
+    response = w.files.download(volume_path)
+    return response.contents.read()
+
+
 class NBADataLoader:
     """NBAデータの読み込みと前処理を行うクラス（Polars版）"""
 
@@ -33,8 +64,10 @@ class NBADataLoader:
         ----------
         data_dir : str
             データディレクトリのパス
+            Databricks Apps環境では、Volumeのパス（例: /Volumes/workspace/nba_analysis/data）
         """
         self.data_dir = Path(data_dir)
+        self._is_databricks = is_databricks_apps()
         self._boxscore: Optional[pl.DataFrame] = None
         self._games: Optional[pl.DataFrame] = None
         self._player_info: Optional[pl.DataFrame] = None
@@ -44,42 +77,78 @@ class NBADataLoader:
     # データ読み込み
     # =========================================================================
 
-    def load_boxscore(self, filename: str = "boxscore1946-2025.csv.gz") -> pl.DataFrame:
-        """boxscoreデータを読み込む（gzip圧縮対応）
-
-        Polarsは.gzファイルを自動的に認識して解凍します。
+    def _read_csv_file(self, filename: str, schema_overrides: Optional[dict] = None) -> pl.DataFrame:
         """
-        filepath = self.data_dir / filename
+        CSVファイルを読み込む（環境に応じて適切な方法を選択）
+
+        Parameters
+        ----------
+        filename : str
+            ファイル名
+        schema_overrides : dict, optional
+            スキーマオーバーライド
+
+        Returns
+        -------
+        pl.DataFrame
+            読み込んだデータフレーム
+        """
+        filepath = str(self.data_dir / filename)
+
+        if self._is_databricks:
+            # Databricks Apps: SDKでダウンロードしてからPolarsで読み込む
+            file_content = download_from_volume(filepath)
+
+            # gzip圧縮ファイルの場合は解凍
+            if filename.endswith('.gz'):
+                file_content = gzip.decompress(file_content)
+
+            # バイトデータからPolarsで読み込み
+            try:
+                # Polars >= 0.19
+                return pl.read_csv(
+                    io.BytesIO(file_content),
+                    schema_overrides=schema_overrides,
+                    infer_schema_length=10000,
+                )
+            except TypeError:
+                # Polars < 0.19
+                return pl.read_csv(
+                    io.BytesIO(file_content),
+                    dtypes=schema_overrides,
+                    infer_schema_length=10000,
+                )
+        else:
+            # ローカル/Streamlit Cloud: 直接ファイルパスから読み込み
+            try:
+                # Polars >= 0.19
+                return pl.read_csv(
+                    filepath,
+                    schema_overrides=schema_overrides,
+                    infer_schema_length=10000,
+                )
+            except TypeError:
+                # Polars < 0.19
+                return pl.read_csv(
+                    filepath,
+                    dtypes=schema_overrides,
+                    infer_schema_length=10000,
+                )
+
+    def load_boxscore(self, filename: str = "boxscore1946-2025.csv.gz") -> pl.DataFrame:
+        """boxscoreデータを読み込む（gzip圧縮対応）"""
         # MP列は時間形式（"48:00"など）なので文字列として読み込む
-        try:
-            # Polars >= 0.19
-            self._boxscore = pl.read_csv(
-                filepath,
-                schema_overrides={"MP": pl.Utf8},
-                infer_schema_length=10000,
-            )
-        except TypeError:
-            # Polars < 0.19
-            self._boxscore = pl.read_csv(
-                filepath,
-                dtypes={"MP": pl.Utf8},
-                infer_schema_length=10000,
-            )
+        self._boxscore = self._read_csv_file(filename, schema_overrides={"MP": pl.Utf8})
         return self._boxscore
 
     def load_games(self, filename: str = "games1946-2025.csv.gz") -> pl.DataFrame:
-        """gamesデータを読み込む（gzip圧縮対応）
-
-        Polarsは.gzファイルを自動的に認識して解凍します。
-        """
-        filepath = self.data_dir / filename
-        self._games = pl.read_csv(filepath)
+        """gamesデータを読み込む（gzip圧縮対応）"""
+        self._games = self._read_csv_file(filename)
         return self._games
 
     def load_player_info(self, filename: str = "Players_data_Latest.csv") -> pl.DataFrame:
         """選手情報データを読み込む"""
-        filepath = self.data_dir / filename
-        self._player_info = pl.read_csv(filepath)
+        self._player_info = self._read_csv_file(filename)
         if "birth_date" in self._player_info.columns:
             self._player_info = self._player_info.with_columns(
                 pl.col("birth_date").str.to_datetime(format="%Y-%m-%d", strict=False)

@@ -11,6 +11,9 @@ streamlit>=1.28.0
 # LLM
 anthropic>=0.18.0
 
+# Databricks (for Apps environment)
+databricks-sdk>=0.20.0
+
 # Visualization
 plotly>=5.18.0
 
