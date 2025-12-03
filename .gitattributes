@@ -1,2 +1,1 @@
-data/boxscore1946-2025.csv filter=lfs diff=lfs merge=lfs -text
-data/games1946-2025.csv filter=lfs diff=lfs merge=lfs -text
+# Git LFS removed - using gzip compressed files instead

@@ -1,6 +1,7 @@
 """Claude Haiku APIとの連携モジュール"""
 
 import json
+import os
 import streamlit as st
 from anthropic import Anthropic
 
@@ -13,9 +14,19 @@ MODEL = "claude-haiku-4-5-20251001"
 
 def get_client() -> Anthropic:
     """Anthropicクライアントを取得"""
-    api_key = st.secrets.get("ANTHROPIC_API_KEY")
+    # 環境変数を優先
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+    # 環境変数になければst.secretsから取得（Streamlit Cloud用）
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEYが設定されていません。.streamlit/secrets.tomlを確認してください。")
+        try:
+            api_key = st.secrets.get("ANTHROPIC_API_KEY")
+        except (FileNotFoundError, KeyError, Exception):
+            # secrets.tomlが存在しない場合は無視
+            pass
+
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEYが設定されていません。")
     return Anthropic(api_key=api_key)
 
 

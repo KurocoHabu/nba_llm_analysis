@@ -45,14 +45,20 @@ class NBADataLoader:
     # データ読み込み
     # =========================================================================
 
-    def load_boxscore(self, filename: str = "boxscore1946-2025.csv") -> pd.DataFrame:
-        """boxscoreデータを読み込む"""
+    def load_boxscore(self, filename: str = "boxscore1946-2025.csv.gz") -> pd.DataFrame:
+        """boxscoreデータを読み込む（gzip圧縮対応）
+
+        pandasは.gzファイルを自動的に認識して解凍します。
+        """
         filepath = self.data_dir / filename
         self._boxscore = pd.read_csv(filepath)
         return self._boxscore
 
-    def load_games(self, filename: str = "games1946-2025.csv") -> pd.DataFrame:
-        """gamesデータを読み込む"""
+    def load_games(self, filename: str = "games1946-2025.csv.gz") -> pd.DataFrame:
+        """gamesデータを読み込む（gzip圧縮対応）
+
+        pandasは.gzファイルを自動的に認識して解凍します。
+        """
         filepath = self.data_dir / filename
         self._games = pd.read_csv(filepath)
         return self._games

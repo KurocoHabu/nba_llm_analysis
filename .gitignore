@@ -22,7 +22,9 @@ Thumbs.db
 # Streamlit
 .streamlit/secrets.toml
 
-# Data (large files)
+# Data (large uncompressed files - use .gz versions instead)
+data/boxscore1946-2025.csv
+data/games1946-2025.csv
 data/play_data_*.csv
 data/query_history.json
 

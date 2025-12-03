@@ -22,19 +22,13 @@ def get_data_dir() -> str:
 
     優先順位:
     1. 環境変数 DATA_DIR
-    2. Databricks Volume パス（存在する場合）
-    3. ローカルの data ディレクトリ
+    2. ローカルの data ディレクトリ
     """
     # 環境変数で明示的に指定されている場合
     if os.environ.get("DATA_DIR"):
         return os.environ["DATA_DIR"]
 
-    # Databricks環境の場合（Volumeパスが存在するか）
-    databricks_path = "/Volumes/workspace/nba_analysis/data"
-    if os.path.exists(databricks_path):
-        return databricks_path
-
-    # ローカル環境
+    # ローカル/Streamlit Cloud環境
     return "data"
 
 
@@ -60,8 +54,8 @@ def load_data():
     """
     data_dir = get_data_dir()
     loader = NBADataLoader(data_dir=data_dir)
-    loader.load_boxscore("boxscore1946-2025.csv")
-    loader.load_games("games1946-2025.csv")
+    loader.load_boxscore("boxscore1946-2025.csv.gz")
+    loader.load_games("games1946-2025.csv.gz")
     loader.load_player_info("Players_data_Latest.csv")
 
     df = loader.create_analysis_df()
