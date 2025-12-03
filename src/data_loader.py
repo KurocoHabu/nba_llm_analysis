@@ -29,11 +29,26 @@ STAT_START_SEASONS = {
 }
 
 
-def is_databricks_apps() -> bool:
-    """Databricks Apps環境かどうかを判定"""
-    result = os.environ.get("DATABRICKS_APPS") == "true"
-    print(f"[DEBUG] DATABRICKS_APPS={os.environ.get('DATABRICKS_APPS')}, is_databricks={result}")
-    return result
+def is_databricks_apps(data_dir: str = None) -> bool:
+    """Databricks Apps環境かどうかを判定
+
+    判定方法:
+    1. 環境変数 DATABRICKS_APPS が "true" の場合
+    2. DATA_DIR が /Volumes で始まる場合
+    """
+    # 環境変数で明示的に指定されている場合
+    if os.environ.get("DATABRICKS_APPS") == "true":
+        print("[DEBUG] is_databricks_apps: True (via DATABRICKS_APPS env)")
+        return True
+
+    # DATA_DIRがVolumeパスの場合
+    data_dir_env = data_dir or os.environ.get("DATA_DIR", "")
+    if data_dir_env.startswith("/Volumes"):
+        print(f"[DEBUG] is_databricks_apps: True (DATA_DIR={data_dir_env})")
+        return True
+
+    print(f"[DEBUG] is_databricks_apps: False (DATABRICKS_APPS={os.environ.get('DATABRICKS_APPS')}, DATA_DIR={data_dir_env})")
+    return False
 
 
 def download_from_volume(volume_path: str) -> bytes:
@@ -69,7 +84,8 @@ class NBADataLoader:
             Databricks Apps環境では、Volumeのパス（例: /Volumes/workspace/nba_analysis/data）
         """
         self.data_dir = Path(data_dir)
-        self._is_databricks = is_databricks_apps()
+        self._is_databricks = is_databricks_apps(data_dir)
+        print(f"[DEBUG] NBADataLoader initialized: data_dir={data_dir}, is_databricks={self._is_databricks}")
         self._boxscore: Optional[pl.DataFrame] = None
         self._games: Optional[pl.DataFrame] = None
         self._player_info: Optional[pl.DataFrame] = None
@@ -96,6 +112,7 @@ class NBADataLoader:
             読み込んだデータフレーム
         """
         filepath = str(self.data_dir / filename)
+        print(f"[DEBUG] _read_csv_file: filepath={filepath}, is_databricks={self._is_databricks}")
 
         if self._is_databricks:
             # Databricks Apps: SDKでダウンロードしてからPolarsで読み込む
